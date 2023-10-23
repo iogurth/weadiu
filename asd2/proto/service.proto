@@ -1,0 +1,43 @@
+syntax = "proto3";
+option go_package = "./proto";
+package main;
+
+message MensajeContinente {
+    string Nombre = 1;
+    string Apellido = 2;
+    string Estado = 3;
+}
+
+message AlmacenarEnDN {
+    string Nombre = 1;
+    string Apellido = 2;
+    int32 Id = 3;
+}
+
+message PedirDN {
+    int32 Id = 1;
+}
+
+message ConsultaPoblacion {
+    string Estado = 1;
+}
+
+message NombreCompleto {
+    string Nombre = 1;
+    string Apellido = 2;
+}
+
+message ListaNombres {
+    repeated NombreCompleto nombres = 1;
+}
+
+message RespuestaGenerica {
+    string mensaje = 1;
+}
+
+service MyService {
+    rpc SendContinentMsg (MensajeContinente) returns (RespuestaGenerica) {}
+    rpc SendOMSdepositar (AlmacenarEnDN) returns (RespuestaGenerica) {}
+    rpc SendOMSask (PedirDN) returns (NombreCompleto) {}
+    rpc SendONUMsg (ConsultaPoblacion) returns (ListaNombres) {}
+}

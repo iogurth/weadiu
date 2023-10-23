@@ -1,0 +1,418 @@
+package main
+
+import (
+	"bufio"
+	"containerized-go-app/proto"
+	"context"
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/streadway/amqp"
+	"google.golang.org/grpc"
+)
+
+// Creación del registro
+//var path = "./central/registro.txt"
+
+var path = "registro.txt"
+
+func main() {
+
+	// Crear la cola Rabbit
+
+	connR, errR := amqp.Dial("amqp://guest:guest@10.6.46.112:5672/")
+
+	if errR != nil {
+		log.Fatal(errR)
+	}
+	defer connR.Close()
+
+	// Verificar si existe el archivo registro.txt
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			crearArchivo()
+			fmt.Printf("El archivo %s no existe. \n", path)
+		} else {
+			fmt.Printf("Error al verificar el archivo: %v\n", err)
+		}
+	}
+
+	// Conexión con un servidor Regional Asia
+	conn, err := grpc.Dial("10.6.46.139:50051", grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Fatalf("No se pudo conectar: %v", err)
+	}
+	defer conn.Close()
+	c := proto.NewKeyServiceClient(conn)
+
+	// Conexión con un servidor Regional Europa
+	conne, err := grpc.Dial("10.6.46.112:50052", grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Fatalf("No se pudo conectar: %v", err)
+	}
+	defer conn.Close()
+	e := proto.NewKeyServiceClient(conne)
+
+	// Conexión con un servidor Regional Oceania
+	conno, err := grpc.Dial("10.6.46.113:50053", grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Fatalf("No se pudo conectar: %v", err)
+	}
+	defer conn.Close()
+	o := proto.NewKeyServiceClient(conno)
+
+	// Conexión con un servidor Regional America
+	conna, err := grpc.Dial("10.6.46.114:50054", grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Fatalf("No se pudo conectar: %v", err)
+	}
+	defer conn.Close()
+	a := proto.NewKeyServiceClient(conna)
+
+	// Lectura del archivo de parametros
+	key, iterar := LecturaArchivoInicio()
+	actualizarRegistro(int(key))
+	aux := 0
+	if iterar == -1 {
+		aux = 1
+		iterar = 10
+	}
+
+	i := 1
+	listo := 0
+	// Aca empieza el ciclo
+	for z := 0; z < iterar; z++ {
+		sinbetas := 0
+		chR, errR := connR.Channel()
+
+		if errR != nil {
+			log.Fatal(errR)
+		}
+
+		defer chR.Close()
+
+		// Cola Rabbit ^^^^^
+
+		if aux == 1 {
+			fmt.Printf("Generación %d/infinito\n", i)
+		} else {
+			fmt.Printf("Generación %d/%d\n", i, iterar)
+		}
+
+		// Envio de llaves
+		r, err := c.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 1})
+		if err != nil {
+			log.Fatalf("No se pudo enviar las llaves: %v", err)
+		}
+		log.Printf("Llaves recibidas en el servidor de %s", r.GetMessage())
+
+		// Envio de llaves
+		r, err = e.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 1})
+		if err != nil {
+			log.Fatalf("No se pudo enviar las llaves: %v", err)
+		}
+		log.Printf("Llaves recibidas en el servidor de %s", r.GetMessage())
+
+		// Envio de llaves
+		r, err = o.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 1})
+		if err != nil {
+			log.Fatalf("No se pudo enviar las llaves: %v", err)
+		}
+		log.Printf("Llaves recibidas en el servidor de %s", r.GetMessage())
+
+		// Envio de llaves
+		r, err = a.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 1})
+		if err != nil {
+			log.Fatalf("No se pudo enviar las llaves: %v", err)
+		}
+		log.Printf("Llaves recibidas en el servidor de %s", r.GetMessage())
+
+		queueName := "colaC"
+
+		chDelivery, errR := chR.Consume(
+			queueName,
+			"",
+			false,
+			false,
+			false,
+			false,
+			nil,
+		)
+
+		if errR != nil {
+			log.Fatal(errR)
+		}
+
+		data := ""
+		n := 0
+		for message := range chDelivery {
+			n = n + 1
+			data = string(message.Body)
+			lista := strings.Split(data, "-")
+			nombre := lista[0]
+			valor, _ := strconv.Atoi(lista[1])
+			fmt.Printf("Mensaje asíncrono de servidor %s leído\n", nombre)
+			if listo == 4 {
+				break
+			}
+			if nombre == "Asia" && key != 0 {
+				// Envio de Usuarios Inscritos (Esto es un ejemplo)
+				if valor > int(key) {
+					sinbetas = sinbetas + 1
+					r2, err := c.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 2})
+					escribirEnRegistro(nombre, valor, int(key), valor-int(key))
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", key, r2.GetMessage())
+					key = 0
+				} else if valor == int(key) {
+					r2, err := c.SendKey(context.Background(), &proto.KeyRequest{Key: 0, Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = 0
+					listo = listo + 1
+				} else if valor == 0 {
+					continue
+				} else {
+					r2, err := c.SendKey(context.Background(), &proto.KeyRequest{Key: int32(valor), Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = key - int32(valor)
+					listo = listo + 1
+				}
+			}
+			if nombre == "Europa" && key != 0 {
+				// Envio de Usuarios Inscritos (Esto es un ejemplo)
+				if valor > int(key) {
+					sinbetas = sinbetas + 1
+					r2, err := e.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 2})
+					escribirEnRegistro(nombre, valor, int(key), valor-int(key))
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", key, r2.GetMessage())
+					key = 0
+				} else if valor == int(key) {
+					r2, err := e.SendKey(context.Background(), &proto.KeyRequest{Key: 0, Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = 0
+					listo = listo + 1
+				} else if valor == 0 {
+					continue
+				} else {
+					r2, err := e.SendKey(context.Background(), &proto.KeyRequest{Key: int32(valor), Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = key - int32(valor)
+					listo = listo + 1
+				}
+			}
+			if nombre == "Oceania" && key != 0 {
+				// Envio de Usuarios Inscritos (Esto es un ejemplo)
+				if valor > int(key) {
+					sinbetas = sinbetas + 1
+					r2, err := o.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 2})
+					escribirEnRegistro(nombre, valor, int(key), valor-int(key))
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", key, r2.GetMessage())
+					key = 0
+				} else if valor == int(key) {
+					r2, err := o.SendKey(context.Background(), &proto.KeyRequest{Key: 0, Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = 0
+					listo = listo + 1
+				} else if valor == 0 {
+					continue
+				} else {
+					r2, err := o.SendKey(context.Background(), &proto.KeyRequest{Key: int32(valor), Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = key - int32(valor)
+					listo = listo + 1
+				}
+			}
+			if nombre == "America" && key != 0 {
+				// Envio de Usuarios Inscritos (Esto es un ejemplo)
+				if valor > int(key) {
+					sinbetas = sinbetas + 1
+					r2, err := a.SendKey(context.Background(), &proto.KeyRequest{Key: key, Tipo: 2})
+					escribirEnRegistro(nombre, valor, int(key), valor-int(key))
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", key, r2.GetMessage())
+					key = 0
+				} else if valor == int(key) {
+					r2, err := a.SendKey(context.Background(), &proto.KeyRequest{Key: 0, Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = 0
+					listo = listo + 1
+				} else if valor == 0 {
+					continue
+				} else {
+					r2, err := a.SendKey(context.Background(), &proto.KeyRequest{Key: int32(valor), Tipo: 2})
+					escribirEnRegistro(nombre, valor, valor, 0)
+					if err != nil {
+						log.Fatalf("No se pudo enviar las llaves: %v", err)
+					}
+					log.Printf("Se inscribieron %d cupos de servidor %s", valor, r2.GetMessage())
+					key = key - int32(valor)
+					listo = listo + 1
+				}
+			}
+			if key == 0 && valor != 0 {
+				escribirEnRegistro(nombre, valor, int(key), valor)
+			}
+			if n == 4 {
+				break
+			}
+			message.Ack(false)
+		}
+		if aux == 1 {
+			iterar = iterar + 1
+		}
+		i = i + 1
+		key, _ = LecturaArchivoInicio()
+		if sinbetas == 0 {
+			log.Println("Todos tienen llaves")
+			break
+		}
+		chR.Close()
+		if z+1 == iterar {
+			log.Println("Se acabaron las llaves")
+			break
+		}
+		actualizarRegistro(int(key))
+	}
+
+	// Mantener el programa en funcionamiento
+	//select {}
+
+}
+
+// Funciones Utiles
+func crearArchivo() {
+	var _, err = os.Stat(path)
+
+	if os.IsNotExist(err) {
+		var file, err = os.Create(path)
+		if existeError(err) {
+			return
+		}
+		defer file.Close()
+	}
+
+	fmt.Println("Archivo creado exitosamente", path)
+}
+
+func escribirEnRegistro(nombre string, llaves int, useR int, useNR int) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer f.Close()
+
+	// Escribe en el archivo.
+	if _, err := f.WriteString(fmt.Sprintf("	%s-%d-%d-%d \n", nombre, llaves, useR, useNR)); err != nil {
+		log.Fatalf("error writing to file: %v", err)
+	}
+}
+
+func actualizarRegistro(valor int) {
+	hora := time.Now()
+	horaformateada := hora.Format("15:04")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer f.Close()
+
+	// Escribe en el archivo.
+	//time.Sleep(2 * time.Second)
+	if _, err := f.WriteString(fmt.Sprintf("%s - %d \n", horaformateada, valor)); err != nil {
+		log.Fatalf("error writing to file: %v", err)
+	}
+}
+
+func existeError(err error) bool {
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	return (err != nil)
+}
+
+func LecturaArchivoInicio() (int32, int) {
+	//file, err := os.Open("./central/parametros_de_inicio.txt")
+	file, err := os.Open("parametros_de_inicio.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	llaves := 0
+	iteraciones := 0
+	aux := 0
+
+	for scanner.Scan() {
+		linea := scanner.Text()          // lee una linea del archivo txt
+		linea = strings.TrimSpace(linea) // elimina espacios en el archivo txt
+
+		partes := strings.Split(linea, "-") // Divide la linea en partes usando el "-" de separador
+		if len(partes) == 2 && aux == 0 {   // La idea es utilizar esto para determinar la cantidad de llaves a generar
+			numero1, err1 := strconv.Atoi(partes[0])
+			numero2, err2 := strconv.Atoi(partes[1])
+			if err1 != nil || err2 != nil {
+				fmt.Println("Error al convertir números en línea: ", linea)
+				continue
+			}
+			llaves = rand.Intn(numero2-numero1+1) + numero1
+
+		} else {
+			numero, err := strconv.Atoi(linea)
+			if err != nil {
+				fmt.Println("Error al convertir números en línea: ", linea)
+				continue
+			}
+			iteraciones = numero
+		}
+		aux = aux + 1
+	}
+	return int32(llaves), iteraciones
+
+}
